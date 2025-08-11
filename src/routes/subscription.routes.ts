@@ -28,6 +28,7 @@ router.post(
 );
 
 // Stripe webhook - no authentication needed
+// Note: Raw body handling is done in index.ts before JSON parser
 router.post(
   '/webhook',
   subscriptionController.handleWebhook
