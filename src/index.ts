@@ -26,18 +26,24 @@ app.use(cors({
   credentials: true,
 }));
 
-// Request logging middleware
-app.use((req, _res: any, next) => {
-  console.log(`\n🌐 Incoming request: ${req.method} ${req.url}`);
-  console.log('Headers:', req.headers);
-  next();
-});
-
 // Special handling for Stripe webhooks (raw body needed) - MUST come before express.json()
 // This middleware ensures the body is kept raw for Stripe signature verification
 // Support both singular and plural routes for backward compatibility
-app.use('/api/subscriptions/webhook', express.raw({ type: 'application/json' }));
-app.use('/api/subscription/webhook', express.raw({ type: 'application/json' }));
+// Use type: '*/*' to handle all content types that Stripe might send
+app.use('/api/subscriptions/webhook', express.raw({ type: '*/*' }));
+app.use('/api/subscription/webhook', express.raw({ type: '*/*' }));
+
+// Request logging middleware - AFTER raw body setup to avoid interference
+app.use((req, _res: any, next) => {
+  // Don't log body for webhook routes to avoid Buffer issues
+  const isWebhook = req.url.includes('/webhook');
+  console.log(`\n🌐 Incoming request: ${req.method} ${req.url}`);
+  console.log('Headers:', req.headers);
+  if (!isWebhook && req.body) {
+    console.log('Body preview:', JSON.stringify(req.body).substring(0, 200));
+  }
+  next();
+});
 
 // Body parsing middleware - IMPORTANT: Must come AFTER webhook raw body handler
 app.use(express.json());

@@ -88,28 +88,45 @@ export class SubscriptionController {
   }
 
   async handleWebhook(req: Request, res: Response): Promise<Response | void> {
-    const sig = req.headers['stripe-signature'] as string;
-    let event: Stripe.Event;
-
-    console.log('🔔 Webhook received:', {
-      path: req.originalUrl,
-      eventType: req.body?.type || 'unknown',
-      signature: sig ? 'present' : 'missing'
-    });
-
+    // Wrap entire handler in try-catch to prevent server crashes
     try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET!
-      );
-      console.log('✅ Webhook signature verified for event:', event.type);
-    } catch (err) {
-      console.error('❌ Webhook signature verification failed:', err);
-      return res.status(400).send(`Webhook Error: ${err}`);
-    }
+      const sig = req.headers['stripe-signature'] as string;
+      let event: Stripe.Event;
 
-    try {
+      // Log webhook received - handle Buffer body safely
+      console.log('🔔 Webhook received:', {
+        path: req.originalUrl,
+        signature: sig ? 'present' : 'missing',
+        bodyType: Buffer.isBuffer(req.body) ? 'Buffer' : typeof req.body,
+        bodyLength: Buffer.isBuffer(req.body) ? req.body.length : JSON.stringify(req.body).length
+      });
+
+      // Check if webhook secret is configured
+      if (!process.env.STRIPE_WEBHOOK_SECRET) {
+        console.error('❌ STRIPE_WEBHOOK_SECRET not configured');
+        return res.status(500).json({ error: 'Webhook secret not configured' });
+      }
+
+      // Check if body is Buffer (required for Stripe signature verification)
+      if (!Buffer.isBuffer(req.body)) {
+        console.error('❌ Webhook body is not a Buffer. Got:', typeof req.body);
+        return res.status(400).json({ error: 'Invalid webhook body format' });
+      }
+
+      // Verify webhook signature
+      try {
+        event = stripe.webhooks.constructEvent(
+          req.body,
+          sig,
+          process.env.STRIPE_WEBHOOK_SECRET
+        );
+        console.log('✅ Webhook signature verified for event:', event.type);
+      } catch (err) {
+        console.error('❌ Webhook signature verification failed:', err);
+        return res.status(400).send(`Webhook Error: ${err}`);
+      }
+
+      // Process the webhook event
       console.log(`📥 Processing webhook event: ${event.type}`);
       
       switch (event.type) {
@@ -162,8 +179,11 @@ export class SubscriptionController {
       console.log(`✅ Successfully processed webhook event: ${event.type}`);
       return res.json({ received: true });
     } catch (error) {
-      console.error('❌ Webhook handler error:', error);
-      return res.status(500).json({ error: 'Webhook handler failed' });
+      // Catch any error to prevent server crash
+      console.error('❌ Webhook handler critical error:', error);
+      console.error('Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
+      // Always return a response to prevent hanging
+      return res.status(500).json({ error: 'Webhook handler failed', message: error instanceof Error ? error.message : 'Unknown error' });
     }
   }
 
