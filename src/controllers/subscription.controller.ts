@@ -213,7 +213,7 @@ export class SubscriptionController {
       .update({
         subscription_status: 'active',
         subscription_id: subscription.id,
-        subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+        subscription_current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       })
       .eq('id', userId);
 
@@ -225,8 +225,8 @@ export class SubscriptionController {
         stripe_subscription_id: subscription.id,
         status: 'active',
         price_id: subscription.items.data[0].price.id,
-        current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-        current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+        current_period_start: subscription.current_period_start ? new Date(subscription.current_period_start * 1000).toISOString() : new Date().toISOString(),
+        current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       });
 
     console.log(`Generated license key ${licenseKey} for user ${userId}`);
@@ -272,7 +272,7 @@ export class SubscriptionController {
       .update({
         subscription_status: status,
         subscription_id: subscription.id,
-        subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+        subscription_current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       })
       .eq('id', user.id);
 
@@ -284,8 +284,8 @@ export class SubscriptionController {
         stripe_subscription_id: subscription.id,
         status: status,
         price_id: subscription.items.data[0].price.id,
-        current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-        current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+        current_period_start: subscription.current_period_start ? new Date(subscription.current_period_start * 1000).toISOString() : new Date().toISOString(),
+        current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       });
 
     console.log(`✅ Subscription created and license generated for user ${user.id}`);
@@ -351,7 +351,7 @@ export class SubscriptionController {
       .from('users')
       .update({
         subscription_status: status,
-        subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+        subscription_current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       })
       .eq('id', user.id);
 
@@ -363,8 +363,8 @@ export class SubscriptionController {
         stripe_subscription_id: subscription.id,
         status: status,
         price_id: subscription.items.data[0].price.id,
-        current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-        current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+        current_period_start: subscription.current_period_start ? new Date(subscription.current_period_start * 1000).toISOString() : new Date().toISOString(),
+        current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       });
   }
 

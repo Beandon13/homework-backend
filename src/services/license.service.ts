@@ -49,14 +49,11 @@ export class LicenseService {
   }
 
   static async generateLicenseKey(userId: string, licenseType: string = 'standard'): Promise<string> {
-    // Call the database function to generate a unique license key
-    const { data, error } = await supabase.rpc('generate_license_key');
-    
-    if (error) {
-      throw new Error('Failed to generate license key');
-    }
-    
-    const licenseKey = data;
+    // Generate a unique license key in JavaScript
+    // Format: SM-{timestamp}-{random string}
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const licenseKey = `SM-${timestamp}-${randomString}`;
     
     // Calculate expiration based on license type
     const expiresAt = new Date();
