@@ -35,7 +35,9 @@ app.use((req, _res: any, next) => {
 
 // Special handling for Stripe webhooks (raw body needed) - MUST come before express.json()
 // This middleware ensures the body is kept raw for Stripe signature verification
+// Support both singular and plural routes for backward compatibility
 app.use('/api/subscriptions/webhook', express.raw({ type: 'application/json' }));
+app.use('/api/subscription/webhook', express.raw({ type: 'application/json' }));
 
 // Body parsing middleware - IMPORTANT: Must come AFTER webhook raw body handler
 app.use(express.json());
@@ -110,6 +112,9 @@ console.log('📂 Mounting auth routes at /api/auth');
 app.use('/api/auth', authRoutes);
 console.log('📂 Mounting subscription routes at /api/subscriptions');
 app.use('/api/subscriptions', subscriptionRoutes);
+// Also mount at singular path for backward compatibility with Stripe webhook
+console.log('📂 Mounting subscription routes at /api/subscription (alias)');
+app.use('/api/subscription', subscriptionRoutes);
 
 // Error handling middleware
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction): any => {

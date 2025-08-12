@@ -4,6 +4,7 @@ import { AuthController } from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { handleValidationErrors } from '../middleware/validation.js';
 import { LicenseService } from '../services/license.service.js';
+import { supabase } from '../services/supabase.js';
 
 const router = Router();
 const authController = new AuthController();
@@ -72,6 +73,38 @@ router.get('/license', authenticate, async (req, res) => {
     res.json(licenseInfo);
   } catch (error) {
     res.status(500).json({ error: 'Failed to get license info' });
+  }
+});
+
+router.post('/validate-license', authenticate, async (req, res) => {
+  try {
+    const licenseInfo = await LicenseService.validateLicense(req.user!.userId);
+    res.json(licenseInfo);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to validate license' });
+  }
+});
+
+router.get('/license-status', authenticate, async (req, res) => {
+  try {
+    // Get user with full license and subscription info
+    const { data: user, error } = await supabase
+      .from('users')
+      .select(`
+        id, email, subscription_status, license_key, license_type, 
+        license_status, license_expires_at, subscription_current_period_end,
+        subscription_id, max_devices
+      `)
+      .eq('id', req.user!.userId)
+      .single();
+
+    if (error || !user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ user });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get license status' });
   }
 });
 

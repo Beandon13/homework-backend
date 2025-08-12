@@ -91,50 +91,78 @@ export class SubscriptionController {
     const sig = req.headers['stripe-signature'] as string;
     let event: Stripe.Event;
 
+    console.log('🔔 Webhook received:', {
+      path: req.originalUrl,
+      eventType: req.body?.type || 'unknown',
+      signature: sig ? 'present' : 'missing'
+    });
+
     try {
       event = stripe.webhooks.constructEvent(
         req.body,
         sig,
         process.env.STRIPE_WEBHOOK_SECRET!
       );
+      console.log('✅ Webhook signature verified for event:', event.type);
     } catch (err) {
-      console.error('Webhook signature verification failed:', err);
+      console.error('❌ Webhook signature verification failed:', err);
       return res.status(400).send(`Webhook Error: ${err}`);
     }
 
     try {
+      console.log(`📥 Processing webhook event: ${event.type}`);
+      
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object as Stripe.Checkout.Session;
+          console.log('💳 Checkout session completed:', session.id);
           await this.handleCheckoutComplete(session);
+          break;
+        }
+
+        case 'customer.subscription.created': {
+          const subscription = event.data.object as Stripe.Subscription;
+          console.log('🆕 New subscription created:', subscription.id);
+          await this.handleSubscriptionCreated(subscription);
           break;
         }
 
         case 'customer.subscription.updated': {
           const subscription = event.data.object as Stripe.Subscription;
+          console.log('🔄 Subscription updated:', subscription.id);
           await this.handleSubscriptionUpdate(subscription);
           break;
         }
 
         case 'customer.subscription.deleted': {
           const subscription = event.data.object as Stripe.Subscription;
+          console.log('🗑️ Subscription deleted:', subscription.id);
           await this.handleSubscriptionDeleted(subscription);
+          break;
+        }
+
+        case 'invoice.payment_succeeded': {
+          const invoice = event.data.object as Stripe.Invoice;
+          console.log('💰 Payment succeeded for invoice:', invoice.id);
+          await this.handlePaymentSucceeded(invoice);
           break;
         }
 
         case 'invoice.payment_failed': {
           const invoice = event.data.object as Stripe.Invoice;
+          console.log('❌ Payment failed for invoice:', invoice.id);
           await this.handlePaymentFailed(invoice);
           break;
         }
 
         default:
-          console.log(`Unhandled event type ${event.type}`);
+          console.log(`⚠️ Unhandled event type: ${event.type}`);
       }
 
+      console.log(`✅ Successfully processed webhook event: ${event.type}`);
       return res.json({ received: true });
     } catch (error) {
-      console.error('Webhook handler error:', error);
+      console.error('❌ Webhook handler error:', error);
       return res.status(500).json({ error: 'Webhook handler failed' });
     }
   }
@@ -182,6 +210,110 @@ export class SubscriptionController {
       });
 
     console.log(`Generated license key ${licenseKey} for user ${userId}`);
+  }
+
+  private async handleSubscriptionCreated(subscription: Stripe.Subscription) {
+    console.log('Processing new subscription creation...');
+    
+    const { data: user } = await supabase
+      .from('users')
+      .select('id')
+      .eq('stripe_customer_id', subscription.customer as string)
+      .single();
+
+    if (!user) {
+      console.error('User not found for customer:', subscription.customer);
+      return;
+    }
+
+    const status = this.mapStripeStatus(subscription.status);
+    
+    // Determine license type based on price
+    const priceId = subscription.items.data[0].price.id;
+    let licenseType = 'standard';
+    
+    if (priceId === process.env.STRIPE_PREMIUM_PRICE_ID) {
+      licenseType = 'premium';
+    } else if (priceId === process.env.STRIPE_ENTERPRISE_PRICE_ID) {
+      licenseType = 'enterprise';
+    }
+
+    // Generate license key for new subscription
+    try {
+      const licenseKey = await LicenseService.generateLicenseKey(user.id, licenseType);
+      console.log(`✅ Generated license key for new subscription: ${licenseKey}`);
+    } catch (error) {
+      console.error('Failed to generate license key:', error);
+    }
+
+    // Update subscription status
+    await supabase
+      .from('users')
+      .update({
+        subscription_status: status,
+        subscription_id: subscription.id,
+        subscription_current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+      })
+      .eq('id', user.id);
+
+    // Add to subscription history
+    await supabase
+      .from('subscription_history')
+      .insert({
+        user_id: user.id,
+        stripe_subscription_id: subscription.id,
+        status: status,
+        price_id: subscription.items.data[0].price.id,
+        current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+        current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+      });
+
+    console.log(`✅ Subscription created and license generated for user ${user.id}`);
+  }
+
+  private async handlePaymentSucceeded(invoice: Stripe.Invoice) {
+    console.log('Processing successful payment...');
+    
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, license_key')
+      .eq('stripe_customer_id', invoice.customer as string)
+      .single();
+
+    if (!user) {
+      console.error('User not found for customer:', invoice.customer);
+      return;
+    }
+
+    // If user doesn't have a license key yet, generate one
+    if (!user.license_key && invoice.subscription) {
+      try {
+        const subscription = await stripe.subscriptions.retrieve(invoice.subscription as string);
+        const priceId = subscription.items.data[0].price.id;
+        let licenseType = 'standard';
+        
+        if (priceId === process.env.STRIPE_PREMIUM_PRICE_ID) {
+          licenseType = 'premium';
+        } else if (priceId === process.env.STRIPE_ENTERPRISE_PRICE_ID) {
+          licenseType = 'enterprise';
+        }
+
+        const licenseKey = await LicenseService.generateLicenseKey(user.id, licenseType);
+        console.log(`✅ Generated license key after payment success: ${licenseKey}`);
+      } catch (error) {
+        console.error('Failed to generate license key after payment:', error);
+      }
+    }
+
+    // Update subscription status to active
+    await supabase
+      .from('users')
+      .update({
+        subscription_status: 'active',
+      })
+      .eq('id', user.id);
+
+    console.log(`✅ Payment succeeded and license activated for user ${user.id}`);
   }
 
   private async handleSubscriptionUpdate(subscription: Stripe.Subscription) {
