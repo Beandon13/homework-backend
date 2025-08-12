@@ -70,18 +70,18 @@ router.post('/resend-verification', resendVerificationValidation, handleValidati
 router.get('/license', authenticate, async (req, res) => {
   try {
     const licenseInfo = await LicenseService.validateLicense(req.user!.userId);
-    res.json(licenseInfo);
+    return res.json(licenseInfo);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get license info' });
+    return res.status(500).json({ error: 'Failed to get license info' });
   }
 });
 
 router.post('/validate-license', authenticate, async (req, res) => {
   try {
     const licenseInfo = await LicenseService.validateLicense(req.user!.userId);
-    res.json(licenseInfo);
+    return res.json(licenseInfo);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to validate license' });
+    return res.status(500).json({ error: 'Failed to validate license' });
   }
 });
 
@@ -102,18 +102,18 @@ router.get('/license-status', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ user });
+    return res.json({ user });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get license status' });
+    return res.status(500).json({ error: 'Failed to get license status' });
   }
 });
 
 router.get('/license/devices', authenticate, async (req, res) => {
   try {
     const devices = await LicenseService.getActiveDevices(req.user!.userId);
-    res.json({ devices });
+    return res.json({ devices });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to get active devices' });
+    return res.status(500).json({ error: 'Failed to get active devices' });
   }
 });
 
@@ -122,12 +122,12 @@ router.post('/license/deactivate', authenticate, body('machineId').optional(), a
     const { machineId } = req.body;
     const success = await LicenseService.deactivateDevice(req.user!.userId, machineId);
     if (success) {
-      res.json({ message: 'Device deactivated successfully' });
+      return res.json({ message: 'Device deactivated successfully' });
     } else {
-      res.status(400).json({ error: 'Failed to deactivate device' });
+      return res.status(400).json({ error: 'Failed to deactivate device' });
     }
   } catch (error) {
-    res.status(500).json({ error: 'Failed to deactivate device' });
+    return res.status(500).json({ error: 'Failed to deactivate device' });
   }
 });
 
