@@ -6,7 +6,8 @@
       "Bash(curl:*)",
       "Bash(git push:*)",
       "Bash(npx tsc:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(npm run dev:*)"
     ],
     "deny": []
   }

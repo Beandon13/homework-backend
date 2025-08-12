@@ -18,20 +18,20 @@ router.post(
   authenticate,
   checkoutValidation,
   handleValidationErrors,
-  subscriptionController.createCheckoutSession
+  subscriptionController.createCheckoutSession.bind(subscriptionController)
 );
 
 router.post(
   '/create-portal-session',
   authenticate,
-  subscriptionController.createPortalSession
+  subscriptionController.createPortalSession.bind(subscriptionController)
 );
 
 // Stripe webhook - no authentication needed
 // Note: Raw body handling is done in index.ts before JSON parser
 router.post(
   '/webhook',
-  subscriptionController.handleWebhook
+  subscriptionController.handleWebhook.bind(subscriptionController)
 );
 
 export default router;
