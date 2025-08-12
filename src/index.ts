@@ -153,4 +153,4 @@ app.listen(PORT, () => {
   console.log(`   - POST /api/test`);
   console.log(`   - *    /api/auth/*`);
   console.log(`   - *    /api/subscriptions/*`);
-});
+});// Deploy to Railway 
