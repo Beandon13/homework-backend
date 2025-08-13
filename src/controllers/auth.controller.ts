@@ -264,6 +264,7 @@ export class AuthController {
         .from('licenses')
         .select('license_key, license_type, status, expires_at')
         .eq('user_id', req.user.userId)
+        .eq('status', 'active')
         .single();
 
       return res.json({ 
