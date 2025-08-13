@@ -260,7 +260,21 @@ export class AuthController {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      return res.json({ user });
+      const { data: license } = await supabase
+        .from('licenses')
+        .select('license_key, license_type, status, expires_at')
+        .eq('user_id', req.user.userId)
+        .single();
+
+      return res.json({ 
+        user: {
+          ...user,
+          license_key: license?.license_key || 'Not assigned',
+          license_status: license?.status || 'UNKNOWN',
+          license_type: license?.license_type || 'N/A',
+          expires_at: license?.expires_at || 'N/A'
+        }
+      });
     } catch (error) {
       console.error('Get profile error:', error);
       return res.status(500).json({ error: 'Failed to get profile' });
