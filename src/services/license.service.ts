@@ -80,7 +80,7 @@ export class LicenseService {
         license_key: licenseKey,
         license_type: licenseType,
         license_status: 'active',
-        license_expires_at: expiresAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
         max_devices: licenseType === 'enterprise' ? 10 : licenseType === 'premium' ? 5 : 1
       });
     
