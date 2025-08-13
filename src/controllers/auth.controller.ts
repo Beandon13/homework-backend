@@ -3,7 +3,6 @@ import { supabase } from '../services/supabase.js';
 import { stripe } from '../services/stripe.js';
 import { hashPassword, comparePassword, generateToken } from '../utils/auth.js';
 import { CreateUserDTO, LoginDTO } from '../types/index.js';
-import { LicenseService } from '../services/license.service.js';
 
 export class AuthController {
   async forgotPassword(req: Request<{}, {}, { email: string }>, res: Response): Promise<Response> {
