@@ -76,12 +76,14 @@ export class LicenseService {
     const { error: insertError } = await supabase
       .from('licenses')
       .insert({
+        id: crypto.randomUUID(),
         user_id: userId,
         license_key: licenseKey,
         license_type: licenseType,
         status: 'active',
         expires_at: expiresAt.toISOString(),
-        max_devices: licenseType === 'enterprise' ? 10 : licenseType === 'premium' ? 5 : 1
+        stripe_customer_id: null,
+        stripe_subscription_id: null
       });
     
     if (insertError) {
