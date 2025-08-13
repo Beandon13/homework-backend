@@ -189,10 +189,20 @@ export class SubscriptionController {
 
   private async handleCheckoutComplete(session: Stripe.Checkout.Session) {
     const userId = session.metadata?.userId;
-    if (!userId) return;
+    if (!userId) {
+      console.error('No userId found in session metadata');
+      return;
+    }
 
     const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
     const customerId = subscription.customer as string;
+
+    console.log('Handling checkout complete:', {
+      userId,
+      customerId,
+      subscriptionId: subscription.id,
+      status: subscription.status
+    });
 
     // Determine license type based on price
     const priceId = subscription.items.data[0].price.id;
@@ -214,7 +224,7 @@ export class SubscriptionController {
     );
 
     // Update user subscription status to 'active'
-    await supabase
+    const { data: updateData, error: updateError } = await supabase
       .from('users')
       .update({
         subscription_status: 'active',
@@ -222,10 +232,25 @@ export class SubscriptionController {
         subscription_id: subscription.id,
         subscription_current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       })
-      .eq('id', userId);
+      .eq('id', userId)
+      .select();
+
+    if (updateError) {
+      console.error('Failed to update user subscription status:', {
+        error: updateError,
+        userId,
+        customerId,
+        subscriptionId: subscription.id
+      });
+    } else {
+      console.log('Successfully updated user subscription status:', {
+        userId,
+        updatedData: updateData
+      });
+    }
 
     // Add to subscription history
-    await supabase
+    const { error: historyError } = await supabase
       .from('subscription_history')
       .insert({
         user_id: userId,
@@ -235,6 +260,10 @@ export class SubscriptionController {
         current_period_start: subscription.current_period_start ? new Date(subscription.current_period_start * 1000).toISOString() : new Date().toISOString(),
         current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       });
+
+    if (historyError) {
+      console.error('Failed to add subscription history:', historyError);
+    }
 
     console.log(`Generated license key ${licenseKey} for user ${userId}`);
   }
@@ -279,7 +308,7 @@ export class SubscriptionController {
     }
 
     // Update subscription status to 'active' if subscription is active
-    await supabase
+    const { error: updateError } = await supabase
       .from('users')
       .update({
         subscription_status: status === 'active' ? 'active' : status,
@@ -288,8 +317,16 @@ export class SubscriptionController {
       })
       .eq('id', user.id);
 
+    if (updateError) {
+      console.error('Failed to update user in handleSubscriptionCreated:', {
+        error: updateError,
+        userId: user.id,
+        subscriptionId: subscription.id
+      });
+    }
+
     // Add to subscription history
-    await supabase
+    const { error: historyError } = await supabase
       .from('subscription_history')
       .insert({
         user_id: user.id,
@@ -299,6 +336,10 @@ export class SubscriptionController {
         current_period_start: subscription.current_period_start ? new Date(subscription.current_period_start * 1000).toISOString() : new Date().toISOString(),
         current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       });
+
+    if (historyError) {
+      console.error('Failed to add subscription history in handleSubscriptionCreated:', historyError);
+    }
 
     console.log(`✅ Subscription created and license generated for user ${user.id}`);
   }
@@ -343,12 +384,19 @@ export class SubscriptionController {
     }
 
     // Update subscription status to active
-    await supabase
+    const { error: updateError } = await supabase
       .from('users')
       .update({
         subscription_status: 'active',
       })
       .eq('id', user.id);
+
+    if (updateError) {
+      console.error('Failed to update user in handlePaymentSucceeded:', {
+        error: updateError,
+        userId: user.id
+      });
+    }
 
     console.log(`✅ Payment succeeded and license activated for user ${user.id}`);
   }
@@ -364,7 +412,7 @@ export class SubscriptionController {
 
     const status = this.mapStripeStatus(subscription.status);
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('users')
       .update({
         subscription_status: status,
@@ -372,8 +420,16 @@ export class SubscriptionController {
       })
       .eq('id', user.id);
 
+    if (updateError) {
+      console.error('Failed to update user in handleSubscriptionUpdate:', {
+        error: updateError,
+        userId: user.id,
+        subscriptionId: subscription.id
+      });
+    }
+
     // Add to subscription history
-    await supabase
+    const { error: historyError } = await supabase
       .from('subscription_history')
       .insert({
         user_id: user.id,
@@ -383,6 +439,10 @@ export class SubscriptionController {
         current_period_start: subscription.current_period_start ? new Date(subscription.current_period_start * 1000).toISOString() : new Date().toISOString(),
         current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       });
+
+    if (historyError) {
+      console.error('Failed to add subscription history in handleSubscriptionUpdate:', historyError);
+    }
   }
 
   private async handleSubscriptionDeleted(subscription: Stripe.Subscription) {
@@ -394,7 +454,7 @@ export class SubscriptionController {
 
     if (!user) return;
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('users')
       .update({
         subscription_status: 'canceled',
@@ -402,14 +462,26 @@ export class SubscriptionController {
       })
       .eq('id', user.id);
 
+    if (updateError) {
+      console.error('Failed to update user in handleSubscriptionDeleted:', {
+        error: updateError,
+        userId: user.id,
+        subscriptionId: subscription.id
+      });
+    }
+
     // Add to subscription history
-    await supabase
+    const { error: historyError } = await supabase
       .from('subscription_history')
       .insert({
         user_id: user.id,
         stripe_subscription_id: subscription.id,
         status: 'canceled',
       });
+
+    if (historyError) {
+      console.error('Failed to add subscription history in handleSubscriptionDeleted:', historyError);
+    }
   }
 
   private async handlePaymentFailed(invoice: Stripe.Invoice) {
@@ -421,12 +493,19 @@ export class SubscriptionController {
 
     if (!user) return;
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('users')
       .update({
         subscription_status: 'past_due',
       })
       .eq('id', user.id);
+
+    if (updateError) {
+      console.error('Failed to update user in handlePaymentFailed:', {
+        error: updateError,
+        userId: user.id
+      });
+    }
   }
 
   private mapStripeStatus(stripeStatus: Stripe.Subscription.Status): 'active' | 'canceled' | 'past_due' {
