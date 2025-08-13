@@ -260,12 +260,15 @@ export class AuthController {
         return res.status(404).json({ error: 'User not found' });
       }
 
-      const { data: license } = await supabase
+      const { data: licenses } = await supabase
         .from('licenses')
         .select('license_key, license_type, status, expires_at')
         .eq('user_id', req.user.userId)
         .eq('status', 'active')
-        .single();
+        .order('created_at', { ascending: false });
+
+      // Use the most recent active license if multiple exist
+      const license = licenses && licenses.length > 0 ? licenses[0] : null;
 
       return res.json({ 
         user: {
@@ -273,7 +276,8 @@ export class AuthController {
           license_key: license?.license_key || 'Not assigned',
           license_status: license?.status || 'UNKNOWN',
           license_type: license?.license_type || 'N/A',
-          expires_at: license?.expires_at || 'N/A'
+          expires_at: license?.expires_at || 'N/A',
+          total_active_licenses: licenses?.length || 0
         }
       });
     } catch (error) {
