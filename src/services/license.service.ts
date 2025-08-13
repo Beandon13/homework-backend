@@ -85,7 +85,8 @@ export class LicenseService {
       });
     
     if (insertError) {
-      throw new Error('Failed to create license for user');
+      console.error('Supabase insert error:', insertError);
+      throw new Error(`Failed to create license: ${insertError.message}`);
     }
     
     return licenseKey;
