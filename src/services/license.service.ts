@@ -79,7 +79,7 @@ export class LicenseService {
         user_id: userId,
         license_key: licenseKey,
         license_type: licenseType,
-        license_status: 'active',
+        status: 'active',
         expires_at: expiresAt.toISOString(),
         max_devices: licenseType === 'enterprise' ? 10 : licenseType === 'premium' ? 5 : 1
       });
