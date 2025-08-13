@@ -3,6 +3,7 @@ import { supabase } from '../services/supabase.js';
 import { stripe } from '../services/stripe.js';
 import { hashPassword, comparePassword, generateToken } from '../utils/auth.js';
 import { CreateUserDTO, LoginDTO } from '../types/index.js';
+import { LicenseService } from '../services/license.service.js';
 
 export class AuthController {
   async forgotPassword(req: Request<{}, {}, { email: string }>, res: Response): Promise<Response> {
@@ -283,6 +284,198 @@ export class AuthController {
     } catch (error) {
       console.error('Get profile error:', error);
       return res.status(500).json({ error: 'Failed to get profile' });
+    }
+  }
+
+  async loginAndGetLicense(req: Request, res: Response): Promise<Response> {
+    try {
+      const { email, password, device_id, device_name } = req.body;
+
+      // Query users table to find user by email
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+      if (userError || !user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // Verify password
+      const isValidPassword = await comparePassword(password, user.password_hash);
+      if (!isValidPassword) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // Query licenses table to find active license for this user's email
+      const { data: license, error: licenseError } = await supabase
+        .from('licenses')
+        .select('id, license_key, user_email, status, expires_at')
+        .eq('user_email', email)
+        .eq('status', 'active')
+        .single();
+
+      if (licenseError || !license) {
+        return res.status(403).json({ error: 'No active license' });
+      }
+
+      // Query authorized_devices table to count devices for this license_id
+      const { data: devices, error: devicesError } = await supabase
+        .from('authorized_devices')
+        .select('id, created_at')
+        .eq('license_id', license.id)
+        .order('created_at', { ascending: true });
+
+      if (devicesError) {
+        throw devicesError;
+      }
+
+      let deviceCount = devices?.length || 0;
+
+      // If count >= 3, delete the oldest device (earliest created_at) for this license_id
+      if (deviceCount >= 3) {
+        const oldestDevice = devices[0];
+        const { error: deleteError } = await supabase
+          .from('authorized_devices')
+          .delete()
+          .eq('id', oldestDevice.id);
+
+        if (deleteError) {
+          throw deleteError;
+        }
+        deviceCount--;
+      }
+
+      // Upsert the current device into authorized_devices table
+      const { error: upsertError } = await supabase
+        .from('authorized_devices')
+        .upsert({
+          license_id: license.id,
+          device_id,
+          device_name
+        }, {
+          onConflict: 'license_id, device_id'
+        });
+
+      if (upsertError) {
+        throw upsertError;
+      }
+
+      // Get final device count after upsert
+      const { data: finalDevices, error: finalCountError } = await supabase
+        .from('authorized_devices')
+        .select('id')
+        .eq('license_id', license.id);
+
+      if (finalCountError) {
+        throw finalCountError;
+      }
+
+      const finalDeviceCount = finalDevices?.length || 0;
+
+      // Generate JWT token
+      const token = generateToken(user.id);
+
+      return res.json({
+        valid: true,
+        token,
+        license_key: license.license_key,
+        user_email: license.user_email,
+        expires_at: license.expires_at,
+        device_count: finalDeviceCount,
+        max_devices: 3
+      });
+    } catch (error) {
+      console.error('Login and get license error:', error);
+      return res.status(500).json({ error: 'Failed to login and validate license' });
+    }
+  }
+
+  async validateLicense(req: Request, res: Response): Promise<Response> {
+    try {
+      const { license_key, device_id, device_name } = req.body;
+
+      // Query the licenses table to find the license by license_key
+      const { data: license, error: licenseError } = await supabase
+        .from('licenses')
+        .select('id, user_email, status, expires_at')
+        .eq('license_key', license_key)
+        .single();
+
+      if (licenseError || !license) {
+        return res.status(400).json({ valid: false, error: 'Invalid license key' });
+      }
+
+      // Check if the license status is 'active'
+      if (license.status !== 'active') {
+        return res.status(400).json({ valid: false, error: 'License inactive' });
+      }
+
+      // Query authorized_devices table to count devices for this license_id
+      const { data: devices, error: devicesError } = await supabase
+        .from('authorized_devices')
+        .select('id, created_at')
+        .eq('license_id', license.id)
+        .order('created_at', { ascending: true });
+
+      if (devicesError) {
+        throw devicesError;
+      }
+
+      let deviceCount = devices?.length || 0;
+
+      // If count >= 3, delete the oldest device (earliest created_at) for this license_id
+      if (deviceCount >= 3) {
+        const oldestDevice = devices[0];
+        const { error: deleteError } = await supabase
+          .from('authorized_devices')
+          .delete()
+          .eq('id', oldestDevice.id);
+
+        if (deleteError) {
+          throw deleteError;
+        }
+        deviceCount--;
+      }
+
+      // Upsert the current device into authorized_devices table
+      const { error: upsertError } = await supabase
+        .from('authorized_devices')
+        .upsert({
+          license_id: license.id,
+          device_id,
+          device_name
+        }, {
+          onConflict: 'license_id, device_id'
+        });
+
+      if (upsertError) {
+        throw upsertError;
+      }
+
+      // Get final device count after upsert
+      const { data: finalDevices, error: finalCountError } = await supabase
+        .from('authorized_devices')
+        .select('id')
+        .eq('license_id', license.id);
+
+      if (finalCountError) {
+        throw finalCountError;
+      }
+
+      const finalDeviceCount = finalDevices?.length || 0;
+
+      return res.json({
+        valid: true,
+        user_email: license.user_email,
+        expires_at: license.expires_at,
+        device_count: finalDeviceCount,
+        max_devices: 3
+      });
+    } catch (error) {
+      console.error('License validation error:', error);
+      return res.status(500).json({ error: 'Failed to validate license' });
     }
   }
 }

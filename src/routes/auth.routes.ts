@@ -37,6 +37,13 @@ const resendVerificationValidation = [
   body('email').isEmail().normalizeEmail(),
 ];
 
+const loginLicenseValidation = [
+  body('email').isEmail().normalizeEmail(),
+  body('password').notEmpty(),
+  body('device_id').notEmpty(),
+  body('device_name').notEmpty(),
+];
+
 // Routes
 router.post('/signup', (req: any, _res: any, next: any) => {
   console.log('📨 Signup route hit:', {
@@ -76,14 +83,9 @@ router.get('/license', authenticate, async (req, res) => {
   }
 });
 
-router.post('/validate-license', authenticate, async (req, res) => {
-  try {
-    const licenseInfo = await LicenseService.validateLicense(req.user!.userId);
-    return res.json(licenseInfo);
-  } catch (error) {
-    return res.status(500).json({ error: 'Failed to validate license' });
-  }
-});
+router.post('/validate-license', authController.validateLicense);
+
+router.post('/login-license', loginLicenseValidation, handleValidationErrors, authController.loginAndGetLicense);
 
 router.get('/license-status', authenticate, async (req, res) => {
   try {
