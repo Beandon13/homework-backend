@@ -48,7 +48,12 @@ export class LicenseService {
     };
   }
 
-  static async generateLicenseKey(userId: string, licenseType: string = 'standard'): Promise<string> {
+  static async generateLicenseKey(
+    userId: string, 
+    licenseType: string = 'standard',
+    stripeCustomerId?: string,
+    stripeSubscriptionId?: string
+  ): Promise<string> {
     // Generate a unique license key in JavaScript
     // Format: SM-{timestamp}-{random string}
     const timestamp = Date.now();
@@ -82,8 +87,8 @@ export class LicenseService {
         license_type: licenseType,
         status: 'active',
         expires_at: expiresAt.toISOString(),
-        stripe_customer_id: null,
-        stripe_subscription_id: null
+        stripe_customer_id: stripeCustomerId || null,
+        stripe_subscription_id: stripeSubscriptionId || null
       });
     
     if (insertError) {

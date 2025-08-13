@@ -192,6 +192,7 @@ export class SubscriptionController {
     if (!userId) return;
 
     const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
+    const customerId = subscription.customer as string;
 
     // Determine license type based on price
     const priceId = subscription.items.data[0].price.id;
@@ -204,10 +205,15 @@ export class SubscriptionController {
       licenseType = 'enterprise';
     }
 
-    // Generate license key for the user
-    const licenseKey = await LicenseService.generateLicenseKey(userId, licenseType);
+    // Generate license key for the user with Stripe IDs
+    const licenseKey = await LicenseService.generateLicenseKey(
+      userId, 
+      licenseType,
+      customerId,
+      subscription.id
+    );
 
-    // Update user subscription status
+    // Update user subscription status to 'active'
     await supabase
       .from('users')
       .update({
@@ -258,19 +264,24 @@ export class SubscriptionController {
       licenseType = 'enterprise';
     }
 
-    // Generate license key for new subscription
+    // Generate license key for new subscription with Stripe IDs
     try {
-      const licenseKey = await LicenseService.generateLicenseKey(user.id, licenseType);
+      const licenseKey = await LicenseService.generateLicenseKey(
+        user.id, 
+        licenseType,
+        subscription.customer as string,
+        subscription.id
+      );
       console.log(`✅ Generated license key for new subscription: ${licenseKey}`);
     } catch (error) {
       console.error('Failed to generate license key:', error);
     }
 
-    // Update subscription status
+    // Update subscription status to 'active' if subscription is active
     await supabase
       .from('users')
       .update({
-        subscription_status: status,
+        subscription_status: status === 'active' ? 'active' : status,
         subscription_id: subscription.id,
         subscription_current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       })
@@ -318,7 +329,12 @@ export class SubscriptionController {
           licenseType = 'enterprise';
         }
 
-        const licenseKey = await LicenseService.generateLicenseKey(user.id, licenseType);
+        const licenseKey = await LicenseService.generateLicenseKey(
+          user.id, 
+          licenseType,
+          invoice.customer as string,
+          invoice.subscription as string
+        );
         console.log(`✅ Generated license key after payment success: ${licenseKey}`);
       } catch (error) {
         console.error('Failed to generate license key after payment:', error);
