@@ -72,20 +72,20 @@ export class LicenseService {
         break;
     }
     
-    // Update user with license info
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({
+    // Insert license info into licenses table
+    const { error: insertError } = await supabase
+      .from('licenses')
+      .insert({
+        user_id: userId,
         license_key: licenseKey,
         license_type: licenseType,
         license_status: 'active',
         license_expires_at: expiresAt.toISOString(),
         max_devices: licenseType === 'enterprise' ? 10 : licenseType === 'premium' ? 5 : 1
-      })
-      .eq('id', userId);
+      });
     
-    if (updateError) {
-      throw new Error('Failed to assign license to user');
+    if (insertError) {
+      throw new Error('Failed to create license for user');
     }
     
     return licenseKey;
