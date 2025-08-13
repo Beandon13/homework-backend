@@ -218,6 +218,7 @@ export class SubscriptionController {
       .from('users')
       .update({
         subscription_status: 'active',
+        stripe_customer_id: customerId,
         subscription_id: subscription.id,
         subscription_current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       })
