@@ -127,56 +127,87 @@ export class SubscriptionController {
       }
 
       // Process the webhook event
-      console.log(`📥 Processing webhook event: ${event.type}`);
+      const webhookTimestamp = new Date().toISOString();
+      console.log(`📥 [${webhookTimestamp}] Processing webhook event: ${event.type}`, {
+        eventId: event.id,
+        created: new Date(event.created * 1000).toISOString(),
+        livemode: event.livemode
+      });
       
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object as Stripe.Checkout.Session;
-          console.log('💳 Checkout session completed:', session.id);
+          console.log(`💳 [${webhookTimestamp}] Checkout session completed:`, {
+            sessionId: session.id,
+            customerId: session.customer,
+            subscriptionId: session.subscription,
+            userId: session.metadata?.userId
+          });
           await this.handleCheckoutComplete(session);
           break;
         }
 
         case 'customer.subscription.created': {
           const subscription = event.data.object as Stripe.Subscription;
-          console.log('🆕 New subscription created:', subscription.id);
+          console.log(`🆕 [${webhookTimestamp}] New subscription created:`, {
+            subscriptionId: subscription.id,
+            customerId: subscription.customer,
+            status: subscription.status
+          });
           await this.handleSubscriptionCreated(subscription);
           break;
         }
 
         case 'customer.subscription.updated': {
           const subscription = event.data.object as Stripe.Subscription;
-          console.log('🔄 Subscription updated:', subscription.id);
+          console.log(`🔄 [${webhookTimestamp}] Subscription updated:`, {
+            subscriptionId: subscription.id,
+            customerId: subscription.customer,
+            status: subscription.status,
+            mappedStatus: this.mapStripeStatus(subscription.status)
+          });
           await this.handleSubscriptionUpdate(subscription);
           break;
         }
 
         case 'customer.subscription.deleted': {
           const subscription = event.data.object as Stripe.Subscription;
-          console.log('🗑️ Subscription deleted:', subscription.id);
+          console.log(`🗑️ [${webhookTimestamp}] Subscription deleted:`, {
+            subscriptionId: subscription.id,
+            customerId: subscription.customer,
+            status: subscription.status
+          });
           await this.handleSubscriptionDeleted(subscription);
           break;
         }
 
         case 'invoice.payment_succeeded': {
           const invoice = event.data.object as Stripe.Invoice;
-          console.log('💰 Payment succeeded for invoice:', invoice.id);
+          console.log(`💰 [${webhookTimestamp}] Payment succeeded for invoice:`, {
+            invoiceId: invoice.id,
+            customerId: invoice.customer,
+            subscriptionId: invoice.subscription
+          });
           await this.handlePaymentSucceeded(invoice);
           break;
         }
 
         case 'invoice.payment_failed': {
           const invoice = event.data.object as Stripe.Invoice;
-          console.log('❌ Payment failed for invoice:', invoice.id);
+          console.log(`❌ [${webhookTimestamp}] Payment failed for invoice:`, {
+            invoiceId: invoice.id,
+            customerId: invoice.customer,
+            subscriptionId: invoice.subscription
+          });
           await this.handlePaymentFailed(invoice);
           break;
         }
 
         default:
-          console.log(`⚠️ Unhandled event type: ${event.type}`);
+          console.log(`⚠️ [${webhookTimestamp}] Unhandled event type: ${event.type}`);
       }
 
-      console.log(`✅ Successfully processed webhook event: ${event.type}`);
+      console.log(`✅ [${webhookTimestamp}] Successfully processed webhook event: ${event.type}`);
       return res.json({ received: true });
     } catch (error) {
       // Catch any error to prevent server crash
@@ -190,18 +221,33 @@ export class SubscriptionController {
   private async handleCheckoutComplete(session: Stripe.Checkout.Session) {
     const userId = session.metadata?.userId;
     if (!userId) {
-      console.error('No userId found in session metadata');
+      console.error('❌ No userId found in session metadata');
       return;
     }
 
     const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
     const customerId = subscription.customer as string;
 
-    console.log('Handling checkout complete:', {
+    console.log('🔄 Handling checkout complete:', {
       userId,
       customerId,
       subscriptionId: subscription.id,
-      status: subscription.status
+      status: subscription.status,
+      mappedStatus: this.mapStripeStatus(subscription.status)
+    });
+
+    // Log current user state before update
+    const { data: currentUser } = await supabase
+      .from('users')
+      .select('subscription_status, stripe_customer_id, subscription_id')
+      .eq('id', userId)
+      .single();
+    
+    console.log('📊 User state BEFORE checkout complete update:', {
+      userId,
+      currentStatus: currentUser?.subscription_status,
+      currentCustomerId: currentUser?.stripe_customer_id,
+      currentSubscriptionId: currentUser?.subscription_id
     });
 
     // Determine license type based on price
@@ -236,16 +282,23 @@ export class SubscriptionController {
       .select();
 
     if (updateError) {
-      console.error('Failed to update user subscription status:', {
+      console.error('❌ Failed to update user subscription status:', {
         error: updateError,
         userId,
         customerId,
-        subscriptionId: subscription.id
+        subscriptionId: subscription.id,
+        attemptedUpdate: {
+          subscription_status: 'active',
+          stripe_customer_id: customerId,
+          subscription_id: subscription.id
+        }
       });
     } else {
-      console.log('Successfully updated user subscription status:', {
+      console.log('✅ Updated user subscription status to active for userId:', userId);
+      console.log('📊 User state AFTER checkout complete update:', {
         userId,
-        updatedData: updateData
+        updatedData: updateData,
+        rowsAffected: updateData?.length || 0
       });
     }
 
@@ -404,27 +457,72 @@ export class SubscriptionController {
   private async handleSubscriptionUpdate(subscription: Stripe.Subscription) {
     const { data: user } = await supabase
       .from('users')
-      .select('id')
+      .select('id, subscription_status, updated_at')
       .eq('stripe_customer_id', subscription.customer as string)
       .single();
 
     if (!user) return;
 
-    const status = this.mapStripeStatus(subscription.status);
+    const newStatus = this.mapStripeStatus(subscription.status);
+    
+    console.log('📊 Subscription update - current user state:', {
+      userId: user.id,
+      currentStatus: user.subscription_status,
+      newStripeStatus: subscription.status,
+      mappedNewStatus: newStatus,
+      userLastUpdated: user.updated_at
+    });
+
+    // Prevent race condition: Don't overwrite 'active' status with worse status
+    // unless subscription is actually canceled/deleted in Stripe
+    if (user.subscription_status === 'active' && 
+        newStatus !== 'active' && 
+        subscription.status !== 'canceled' && 
+        subscription.status !== 'incomplete_expired') {
+      console.log('⚠️ Preventing subscription status downgrade from active to', newStatus, 'for subscription status:', subscription.status);
+      
+      // Only update period end, not status
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({
+          subscription_current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
+        })
+        .eq('id', user.id);
+        
+      if (updateError) {
+        console.error('❌ Failed to update user period end in handleSubscriptionUpdate:', {
+          error: updateError,
+          userId: user.id,
+          subscriptionId: subscription.id
+        });
+      } else {
+        console.log('✅ Updated subscription period end without changing active status for userId:', user.id);
+      }
+      
+      return;
+    }
 
     const { error: updateError } = await supabase
       .from('users')
       .update({
-        subscription_status: status,
+        subscription_status: newStatus,
         subscription_current_period_end: subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null,
       })
       .eq('id', user.id);
 
     if (updateError) {
-      console.error('Failed to update user in handleSubscriptionUpdate:', {
+      console.error('❌ Failed to update user in handleSubscriptionUpdate:', {
         error: updateError,
         userId: user.id,
-        subscriptionId: subscription.id
+        subscriptionId: subscription.id,
+        attemptedStatus: newStatus
+      });
+    } else {
+      console.log('✅ Updated user subscription status in handleSubscriptionUpdate:', {
+        userId: user.id,
+        subscriptionId: subscription.id,
+        oldStatus: user.subscription_status,
+        newStatus: newStatus
       });
     }
 
@@ -511,12 +609,17 @@ export class SubscriptionController {
   private mapStripeStatus(stripeStatus: Stripe.Subscription.Status): 'active' | 'canceled' | 'past_due' {
     switch (stripeStatus) {
       case 'active':
+      case 'trialing': // Trial period - should be active
+      case 'incomplete': // Payment processing - should be active for successful checkout
         return 'active';
       case 'canceled':
+      case 'incomplete_expired': // Failed payment setup
+      case 'unpaid': // Payment failed multiple times
         return 'canceled';
       case 'past_due':
         return 'past_due';
       default:
+        console.warn(`⚠️ Unknown Stripe subscription status: ${stripeStatus}, defaulting to canceled`);
         return 'canceled';
     }
   }
