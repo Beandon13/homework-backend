@@ -1,4 +1,4 @@
-import { supabase } from '../config/supabase.js';
+import { supabase } from './supabase.js';
 import crypto from 'crypto';
 import os from 'os';
 
