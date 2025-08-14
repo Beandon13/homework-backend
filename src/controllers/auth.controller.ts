@@ -307,11 +307,11 @@ export class AuthController {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // Query licenses table to find active license for this user's email
+      // Query licenses table to find active license for this user
       let { data: license, error: licenseError } = await supabase
         .from('licenses')
-        .select('id, license_key, user_email, status, expires_at')
-        .eq('user_email', email)
+        .select('id, license_key, status, expires_at')
+        .eq('user_id', user.id)
         .eq('status', 'active')
         .single();
 
@@ -329,7 +329,7 @@ export class AuthController {
             status: 'active',
             expires_at: user.subscription_current_period_end
           })
-          .select('id, license_key, user_email, status, expires_at')
+          .select('id, license_key, status, expires_at')
           .single();
 
         if (createError || !newLicense) {
@@ -405,7 +405,7 @@ export class AuthController {
         valid: true,
         token,
         license_key: license.license_key,
-        user_email: license.user_email,
+        user_email: email,
         expires_at: license.expires_at,
         device_count: finalDeviceCount,
         max_devices: 3
@@ -423,7 +423,7 @@ export class AuthController {
       // Query the licenses table to find the license by license_key
       const { data: license, error: licenseError } = await supabase
         .from('licenses')
-        .select('id, user_email, status, expires_at')
+        .select('id, user_id, status, expires_at')
         .eq('license_key', license_key)
         .single();
 
@@ -491,9 +491,16 @@ export class AuthController {
 
       const finalDeviceCount = finalDevices?.length || 0;
 
+      // Get user email from users table
+      const { data: user } = await supabase
+        .from('users')
+        .select('email')
+        .eq('id', license.user_id)
+        .single();
+
       return res.json({
         valid: true,
-        user_email: license.user_email,
+        user_email: user?.email || '',
         expires_at: license.expires_at,
         device_count: finalDeviceCount,
         max_devices: 3
