@@ -11,6 +11,7 @@
       "Bash(npm run check:*)",
       "Bash(npm run:*)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

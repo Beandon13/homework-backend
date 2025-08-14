@@ -325,10 +325,8 @@ export class AuthController {
           .from('licenses')
           .insert({
             user_id: user.id,
-            user_email: email,
             license_key: newLicenseKey,
             status: 'active',
-            license_type: 'subscription',
             expires_at: user.subscription_current_period_end
           })
           .select('id, license_key, user_email, status, expires_at')
