@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
+import rateLimit from 'express-rate-limit';
 import { AuthController } from '../controllers/auth.controller.js';
 import { authenticate } from '../middleware/auth.js';
 import { handleValidationErrors } from '../middleware/validation.js';
@@ -8,6 +9,73 @@ import { supabase } from '../services/supabase.js';
 
 const router = Router();
 const authController = new AuthController();
+
+// Rate limiters for security-sensitive endpoints
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3, // 3 requests per hour per IP
+  message: 'Too many password reset requests. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    console.warn('🚨 Password reset rate limit exceeded:', {
+      ip: req.ip,
+      email: req.body?.email,
+      timestamp: new Date().toISOString()
+    });
+    res.status(429).json({ error: 'Too many password reset requests. Please try again later.' });
+  }
+});
+
+const resetPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5, // 5 attempts per hour per IP
+  message: 'Too many password reset attempts. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // Don't count successful resets
+  handler: (req, res) => {
+    console.warn('🚨 Password reset attempts rate limit exceeded:', {
+      ip: req.ip,
+      timestamp: new Date().toISOString()
+    });
+    res.status(429).json({ error: 'Too many password reset attempts. Please try again later.' });
+  }
+});
+
+const verifyEmailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // 10 requests per hour per IP
+  message: 'Too many email verification attempts. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true // Don't count successful verifications
+});
+
+const resendVerificationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 3, // 3 requests per hour per IP
+  message: 'Too many verification email requests. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res) => {
+    console.warn('🚨 Resend verification rate limit exceeded:', {
+      ip: req.ip,
+      email: req.body?.email,
+      timestamp: new Date().toISOString()
+    });
+    res.status(429).json({ error: 'Too many verification email requests. Please try again later.' });
+  }
+});
+
+const validateLicenseLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 20, // 20 validation attempts per hour per IP
+  message: 'Too many license validation attempts. Please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true // Don't count successful validations
+});
 
 // Validation rules
 const signupValidation = [
@@ -71,13 +139,13 @@ router.post('/login', (req: any, _res: any, next: any) => {
 }, loginValidation, handleValidationErrors, authController.login);
 router.get('/profile', authenticate, authController.getProfile);
 
-// Password recovery routes
-router.post('/forgot-password', forgotPasswordValidation, handleValidationErrors, authController.forgotPassword);
-router.post('/reset-password', resetPasswordValidation, handleValidationErrors, authController.resetPassword);
+// Password recovery routes (with rate limiting)
+router.post('/forgot-password', forgotPasswordLimiter, forgotPasswordValidation, handleValidationErrors, authController.forgotPassword);
+router.post('/reset-password', resetPasswordLimiter, resetPasswordValidation, handleValidationErrors, authController.resetPassword);
 
-// Email verification routes
-router.post('/verify-email', verifyEmailValidation, handleValidationErrors, authController.verifyEmail);
-router.post('/resend-verification', resendVerificationValidation, handleValidationErrors, authController.resendVerification);
+// Email verification routes (with rate limiting)
+router.post('/verify-email', verifyEmailLimiter, verifyEmailValidation, handleValidationErrors, authController.verifyEmail);
+router.post('/resend-verification', resendVerificationLimiter, resendVerificationValidation, handleValidationErrors, authController.resendVerification);
 
 // License management routes
 router.get('/license', authenticate, async (req, res) => {
@@ -89,7 +157,7 @@ router.get('/license', authenticate, async (req, res) => {
   }
 });
 
-router.post('/validate-license', validateLicenseValidation, handleValidationErrors, authController.validateLicense);
+router.post('/validate-license', validateLicenseLimiter, validateLicenseValidation, handleValidationErrors, authController.validateLicense);
 
 router.post('/login-license', loginLicenseValidation, handleValidationErrors, authController.loginAndGetLicense);
 
