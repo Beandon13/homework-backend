@@ -424,7 +424,7 @@ export class AuthController {
       const { licenseKey, deviceId, deviceName } = req.body;
 
       if (!licenseKey || !deviceId || !deviceName) {
-        return res.status(400).json({ valid: false, error: 'Missing required parameters: licenseKey, deviceId, deviceName' });
+        return res.status(400).json({ valid: false, isValid: false, error: 'Missing required parameters: licenseKey, deviceId, deviceName' });
       }
 
       // Query the licenses table to find the license by license_key
@@ -435,17 +435,17 @@ export class AuthController {
         .single();
 
       if (licenseError || !license) {
-        return res.status(400).json({ valid: false, error: 'Invalid license key' });
+        return res.status(400).json({ valid: false, isValid: false, error: 'Invalid license key' });
       }
 
       // Check if the license status is 'active'
       if (license.status !== 'active') {
-        return res.status(400).json({ valid: false, error: 'License inactive' });
+        return res.status(400).json({ valid: false, isValid: false, error: 'License inactive' });
       }
 
       // Check if license has expired
       if (license.expires_at && new Date(license.expires_at) < new Date()) {
-        return res.status(400).json({ valid: false, error: 'License expired' });
+        return res.status(400).json({ valid: false, isValid: false, error: 'License expired' });
       }
 
       // Query authorized_devices table to check if device is authorized for this license
@@ -463,7 +463,7 @@ export class AuthController {
 
       // If device is not found in authorized_devices, it's not valid
       if (!existingDevice) {
-        return res.status(400).json({ valid: false, error: 'Device not authorized for this license' });
+        return res.status(400).json({ valid: false, isValid: false, error: 'Device not authorized for this license' });
       }
 
       // Update the device's last_validated timestamp
@@ -481,11 +481,12 @@ export class AuthController {
       }
 
       return res.json({
-        valid: true
+        valid: true,
+        isValid: true
       });
     } catch (error) {
       console.error('License validation error:', error);
-      return res.status(500).json({ valid: false, error: 'Failed to validate license' });
+      return res.status(500).json({ valid: false, isValid: false, error: 'Failed to validate license' });
     }
   }
 }
