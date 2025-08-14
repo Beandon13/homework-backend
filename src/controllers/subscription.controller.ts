@@ -103,8 +103,16 @@ export class SubscriptionController {
 
       // Check if webhook secret is configured
       if (!process.env.STRIPE_WEBHOOK_SECRET) {
-        console.error('❌ STRIPE_WEBHOOK_SECRET not configured');
-        return res.status(500).json({ error: 'Webhook secret not configured' });
+        const securityLog = {
+          timestamp: new Date().toISOString(),
+          type: 'CONFIGURATION_ERROR',
+          event: 'STRIPE_WEBHOOK_SECRET_MISSING',
+          ip: req.ip || req.connection.remoteAddress,
+          userAgent: req.headers['user-agent'],
+          message: 'Webhook secret not configured - potential security risk'
+        };
+        console.error('🚨 SECURITY CONFIGURATION ERROR:', securityLog);
+        return res.status(500).json({ error: 'Webhook configuration error' });
       }
 
       // Check if body is Buffer (required for Stripe signature verification)
@@ -122,8 +130,35 @@ export class SubscriptionController {
         );
         console.log('✅ Webhook signature verified for event:', event.type);
       } catch (err) {
-        console.error('❌ Webhook signature verification failed:', err);
-        return res.status(400).send(`Webhook Error: ${err}`);
+        // Security logging for failed verification attempts
+        const securityLog = {
+          timestamp: new Date().toISOString(),
+          type: 'SECURITY_ALERT',
+          event: 'WEBHOOK_SIGNATURE_VERIFICATION_FAILED',
+          ip: req.ip || req.connection.remoteAddress,
+          userAgent: req.headers['user-agent'],
+          signature: sig ? 'present but invalid' : 'missing',
+          error: err instanceof Error ? err.message : String(err),
+          headers: {
+            'stripe-signature': sig ? '[REDACTED]' : 'missing',
+            'content-type': req.headers['content-type'],
+            'content-length': req.headers['content-length']
+          }
+        };
+        
+        console.error('🚨 SECURITY ALERT - Invalid webhook signature attempt:', securityLog);
+        
+        // Log to a security monitoring service if configured
+        if (process.env.SECURITY_WEBHOOK_URL) {
+          // Send security alert to monitoring service asynchronously
+          fetch(process.env.SECURITY_WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(securityLog)
+          }).catch(error => console.error('Failed to send security alert:', error));
+        }
+        
+        return res.status(400).send(`Webhook Error: Invalid signature`);
       }
 
       // Process the webhook event

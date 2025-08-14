@@ -310,7 +310,7 @@ export class AuthController {
       // Query licenses table to find active license for this user
       let { data: license, error: licenseError } = await supabase
         .from('licenses')
-        .select('id, license_key, status, expires_at')
+        .select('id, license_key, status, expires_at, max_devices')
         .eq('user_id', user.id)
         .eq('status', 'active')
         .single();
@@ -327,9 +327,10 @@ export class AuthController {
             user_id: user.id,
             license_key: newLicenseKey,
             status: 'active',
-            expires_at: user.subscription_current_period_end
+            expires_at: user.subscription_current_period_end,
+            max_devices: 3
           })
-          .select('id, license_key, status, expires_at')
+          .select('id, license_key, status, expires_at, max_devices')
           .single();
 
         if (createError || !newLicense) {
@@ -356,8 +357,9 @@ export class AuthController {
 
       let deviceCount = devices?.length || 0;
 
-      // If count >= 3, delete the oldest device (earliest last_validated) for this license_id
-      if (deviceCount >= 3) {
+      // If count >= max_devices, delete the oldest device (earliest last_validated) for this license_id
+      const maxDevices = license.max_devices || 3;
+      if (deviceCount >= maxDevices) {
         const oldestDevice = devices[0];
         const { error: deleteError } = await supabase
           .from('authorized_devices')
@@ -411,7 +413,7 @@ export class AuthController {
         user_email: email,
         expires_at: license.expires_at,
         device_count: finalDeviceCount,
-        max_devices: 3
+        max_devices: license.max_devices || 3
       });
     } catch (error) {
       console.error('Login and get license error:', error);
@@ -430,7 +432,7 @@ export class AuthController {
       // Query the licenses table to find the license by license_key
       const { data: license, error: licenseError } = await supabase
         .from('licenses')
-        .select('id, user_id, status, expires_at')
+        .select('id, user_id, status, expires_at, max_devices')
         .eq('license_key', licenseKey)
         .single();
 

@@ -55,10 +55,9 @@ export class LicenseService {
     stripeSubscriptionId?: string
   ): Promise<string> {
     // Generate a unique license key in JavaScript
-    // Format: SM-{timestamp}-{random string}
+    // Format: LIC-{userId}-{timestamp}
     const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
-    const licenseKey = `SM-${timestamp}-${randomString}`;
+    const licenseKey = `LIC-${userId.substring(0, 8).toUpperCase()}-${timestamp}`;
     
     // Calculate expiration based on license type
     const expiresAt = new Date();
@@ -87,6 +86,7 @@ export class LicenseService {
         license_type: licenseType,
         status: 'active',
         expires_at: expiresAt.toISOString(),
+        max_devices: licenseType === 'enterprise' ? 10 : 3,
         stripe_customer_id: stripeCustomerId || null,
         stripe_subscription_id: stripeSubscriptionId || null
       });
@@ -101,30 +101,23 @@ export class LicenseService {
 
   static async validateLicense(userId: string, licenseKey?: string): Promise<LicenseInfo> {
     try {
-      // Get user's license info
-      const { data: user, error } = await supabase
-        .from('users')
-        .select('license_key, license_type, license_status, license_expires_at, max_devices')
-        .eq('id', userId)
+      // Get user's license info from licenses table
+      const { data: license, error } = await supabase
+        .from('licenses')
+        .select('license_key, license_type, status, expires_at, max_devices')
+        .eq('user_id', userId)
+        .eq('status', 'active')
         .single();
       
-      if (error || !user) {
+      if (error || !license) {
         return {
           isValid: false,
-          errorReason: 'User not found'
-        };
-      }
-      
-      // Check if user has a license
-      if (!user.license_key) {
-        return {
-          isValid: false,
-          errorReason: 'No license assigned'
+          errorReason: 'No active license found'
         };
       }
       
       // If license key provided, verify it matches
-      if (licenseKey && user.license_key !== licenseKey) {
+      if (licenseKey && license.license_key !== licenseKey) {
         return {
           isValid: false,
           errorReason: 'Invalid license key'
@@ -132,7 +125,7 @@ export class LicenseService {
       }
       
       // Check license status
-      if (user.license_status === 'revoked') {
+      if (license.status === 'revoked') {
         return {
           isValid: false,
           errorReason: 'License has been revoked'
@@ -141,19 +134,20 @@ export class LicenseService {
       
       // Check expiration
       const now = new Date();
-      const expiresAt = new Date(user.license_expires_at);
+      const expiresAt = new Date(license.expires_at);
       
       if (expiresAt < now) {
         // Update status to expired
         await supabase
-          .from('users')
-          .update({ license_status: 'expired' })
-          .eq('id', userId);
+          .from('licenses')
+          .update({ status: 'expired' })
+          .eq('user_id', userId)
+          .eq('license_key', license.license_key);
         
         return {
           isValid: false,
           errorReason: 'License has expired',
-          licenseKey: user.license_key,
+          licenseKey: license.license_key,
           expiresAt
         };
       }
@@ -161,8 +155,8 @@ export class LicenseService {
       // License is valid
       return {
         isValid: true,
-        licenseKey: user.license_key,
-        licenseType: user.license_type,
+        licenseKey: license.license_key,
+        licenseType: license.license_type,
         expiresAt
       };
     } catch (error) {
@@ -178,48 +172,63 @@ export class LicenseService {
     try {
       const deviceInfo = this.getDeviceInfo();
       
-      // Check if we can activate another device
-      const { data: canActivate } = await supabase.rpc('check_device_limit', {
-        p_user_id: userId
-      });
+      // Get the license ID
+      const { data: license, error: licenseError } = await supabase
+        .from('licenses')
+        .select('id, max_devices')
+        .eq('user_id', userId)
+        .eq('license_key', licenseKey)
+        .eq('status', 'active')
+        .single();
       
-      if (!canActivate) {
-        // Check if this device is already activated
-        const { data: existingActivation } = await supabase
-          .from('license_activations')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('machine_id', deviceInfo.machineId)
-          .eq('is_active', true)
-          .single();
-        
-        if (!existingActivation) {
-          throw new Error('Device limit reached');
-        }
-        
-        // Update last validated time for existing activation
+      if (licenseError || !license) {
+        throw new Error('Invalid or inactive license');
+      }
+      
+      // Check current device count
+      const { data: devices, error: devicesError } = await supabase
+        .from('authorized_devices')
+        .select('id')
+        .eq('license_id', license.id);
+      
+      if (devicesError) {
+        throw devicesError;
+      }
+      
+      const deviceCount = devices?.length || 0;
+      const maxDevices = license.max_devices || 3;
+      
+      // Check if this device already exists
+      const { data: existingDevice } = await supabase
+        .from('authorized_devices')
+        .select('id')
+        .eq('license_id', license.id)
+        .eq('device_id', deviceInfo.machineId)
+        .single();
+      
+      if (existingDevice) {
+        // Update last validated time for existing device
         await supabase
-          .from('license_activations')
-          .update({ last_validated_at: new Date().toISOString() })
-          .eq('id', existingActivation.id);
+          .from('authorized_devices')
+          .update({ last_validated: new Date().toISOString() })
+          .eq('id', existingDevice.id);
         
         return true;
       }
       
-      // Create or update device activation
+      // Check if we can add a new device
+      if (deviceCount >= maxDevices) {
+        throw new Error('Device limit reached');
+      }
+      
+      // Add new device
       const { error } = await supabase
-        .from('license_activations')
-        .upsert({
-          user_id: userId,
-          license_key: licenseKey,
-          machine_id: deviceInfo.machineId,
-          machine_name: deviceInfo.machineName,
-          os_type: deviceInfo.osType,
-          app_version: deviceInfo.appVersion,
-          last_validated_at: new Date().toISOString(),
-          is_active: true
-        }, {
-          onConflict: 'license_key,machine_id'
+        .from('authorized_devices')
+        .insert({
+          license_id: license.id,
+          device_id: deviceInfo.machineId,
+          device_name: deviceInfo.machineName,
+          last_validated: new Date().toISOString()
         });
       
       if (error) {
@@ -237,14 +246,24 @@ export class LicenseService {
     try {
       const targetMachineId = machineId || this.getMachineId();
       
-      const { error } = await supabase
-        .from('license_activations')
-        .update({
-          is_active: false,
-          deactivated_at: new Date().toISOString()
-        })
+      // Get user's active license
+      const { data: license, error: licenseError } = await supabase
+        .from('licenses')
+        .select('id')
         .eq('user_id', userId)
-        .eq('machine_id', targetMachineId);
+        .eq('status', 'active')
+        .single();
+      
+      if (licenseError || !license) {
+        return false;
+      }
+      
+      // Delete the device from authorized_devices
+      const { error } = await supabase
+        .from('authorized_devices')
+        .delete()
+        .eq('license_id', license.id)
+        .eq('device_id', targetMachineId);
       
       return !error;
     } catch (error) {
@@ -253,38 +272,25 @@ export class LicenseService {
     }
   }
 
-  static async recordValidation(
-    userId: string,
-    licenseKey: string,
-    isValid: boolean,
-    validationType: 'hourly' | 'startup' | 'manual' | 'api' = 'api',
-    errorReason?: string,
-    ipAddress?: string
-  ): Promise<void> {
-    try {
-      await supabase
-        .from('license_validations')
-        .insert({
-          user_id: userId,
-          license_key: licenseKey,
-          machine_id: this.getMachineId(),
-          validation_type: validationType,
-          is_valid: isValid,
-          error_reason: errorReason,
-          ip_address: ipAddress
-        });
-    } catch (error) {
-      console.error('Failed to record validation:', error);
-    }
-  }
-
   static async getActiveDevices(userId: string): Promise<any[]> {
-    const { data, error } = await supabase
-      .from('license_activations')
-      .select('*')
+    // Get user's active license
+    const { data: license, error: licenseError } = await supabase
+      .from('licenses')
+      .select('id')
       .eq('user_id', userId)
-      .eq('is_active', true)
-      .order('activated_at', { ascending: false });
+      .eq('status', 'active')
+      .single();
+    
+    if (licenseError || !license) {
+      return [];
+    }
+    
+    // Get devices for this license
+    const { data, error } = await supabase
+      .from('authorized_devices')
+      .select('*')
+      .eq('license_id', license.id)
+      .order('created_at', { ascending: false });
     
     if (error) {
       throw new Error('Failed to fetch active devices');
