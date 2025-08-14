@@ -44,6 +44,12 @@ const loginLicenseValidation = [
   body('device_name').notEmpty(),
 ];
 
+const validateLicenseValidation = [
+  body('licenseKey').notEmpty().withMessage('License key is required'),
+  body('deviceId').notEmpty().withMessage('Device ID is required'),
+  body('deviceName').notEmpty().withMessage('Device name is required'),
+];
+
 // Routes
 router.post('/signup', (req: any, _res: any, next: any) => {
   console.log('📨 Signup route hit:', {
@@ -83,7 +89,7 @@ router.get('/license', authenticate, async (req, res) => {
   }
 });
 
-router.post('/validate-license', authController.validateLicense);
+router.post('/validate-license', validateLicenseValidation, handleValidationErrors, authController.validateLicense);
 
 router.post('/login-license', loginLicenseValidation, handleValidationErrors, authController.loginAndGetLicense);
 

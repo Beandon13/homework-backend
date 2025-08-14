@@ -421,13 +421,17 @@ export class AuthController {
 
   async validateLicense(req: Request, res: Response): Promise<Response> {
     try {
-      const { license_key, device_id, device_name } = req.body;
+      const { licenseKey, deviceId, deviceName } = req.body;
+
+      if (!licenseKey || !deviceId || !deviceName) {
+        return res.status(400).json({ valid: false, error: 'Missing required parameters: licenseKey, deviceId, deviceName' });
+      }
 
       // Query the licenses table to find the license by license_key
       const { data: license, error: licenseError } = await supabase
         .from('licenses')
         .select('id, user_id, status, expires_at')
-        .eq('license_key', license_key)
+        .eq('license_key', licenseKey)
         .single();
 
       if (licenseError || !license) {
@@ -439,78 +443,49 @@ export class AuthController {
         return res.status(400).json({ valid: false, error: 'License inactive' });
       }
 
-      // Query authorized_devices table to count devices for this license_id
-      const { data: devices, error: devicesError } = await supabase
+      // Check if license has expired
+      if (license.expires_at && new Date(license.expires_at) < new Date()) {
+        return res.status(400).json({ valid: false, error: 'License expired' });
+      }
+
+      // Query authorized_devices table to check if device is authorized for this license
+      const { data: existingDevice, error: deviceCheckError } = await supabase
         .from('authorized_devices')
-        .select('id, created_at, last_validated')
+        .select('id, last_validated')
         .eq('license_id', license.id)
-        .order('last_validated', { ascending: true, nullsFirst: true });
-
-      if (devicesError) {
-        throw devicesError;
-      }
-
-      let deviceCount = devices?.length || 0;
-
-      // If count >= 3, delete the oldest device (earliest last_validated) for this license_id
-      if (deviceCount >= 3) {
-        const oldestDevice = devices[0];
-        const { error: deleteError } = await supabase
-          .from('authorized_devices')
-          .delete()
-          .eq('id', oldestDevice.id);
-
-        if (deleteError) {
-          throw deleteError;
-        }
-        deviceCount--;
-      }
-
-      // Upsert the current device into authorized_devices table with updated last_validated
-      const { error: upsertError } = await supabase
-        .from('authorized_devices')
-        .upsert({
-          license_id: license.id,
-          device_id,
-          device_name,
-          last_validated: new Date().toISOString()
-        }, {
-          onConflict: 'license_id, device_id'
-        });
-
-      if (upsertError) {
-        throw upsertError;
-      }
-
-      // Get final device count after upsert
-      const { data: finalDevices, error: finalCountError } = await supabase
-        .from('authorized_devices')
-        .select('id')
-        .eq('license_id', license.id);
-
-      if (finalCountError) {
-        throw finalCountError;
-      }
-
-      const finalDeviceCount = finalDevices?.length || 0;
-
-      // Get user email from users table
-      const { data: user } = await supabase
-        .from('users')
-        .select('email')
-        .eq('id', license.user_id)
+        .eq('device_id', deviceId)
         .single();
 
+      if (deviceCheckError && deviceCheckError.code !== 'PGRST116') {
+        // PGRST116 is "not found" error, which is expected if device isn't authorized
+        throw deviceCheckError;
+      }
+
+      // If device is not found in authorized_devices, it's not valid
+      if (!existingDevice) {
+        return res.status(400).json({ valid: false, error: 'Device not authorized for this license' });
+      }
+
+      // Update the device's last_validated timestamp
+      const { error: updateError } = await supabase
+        .from('authorized_devices')
+        .update({
+          device_name: deviceName,
+          last_validated: new Date().toISOString()
+        })
+        .eq('id', existingDevice.id);
+
+      if (updateError) {
+        console.error('Failed to update device last_validated:', updateError);
+        // Don't fail validation if we can't update timestamp
+      }
+
       return res.json({
-        valid: true,
-        user_email: user?.email || '',
-        expires_at: license.expires_at,
-        device_count: finalDeviceCount,
-        max_devices: 3
+        valid: true
       });
     } catch (error) {
       console.error('License validation error:', error);
-      return res.status(500).json({ error: 'Failed to validate license' });
+      return res.status(500).json({ valid: false, error: 'Failed to validate license' });
     }
   }
 }
