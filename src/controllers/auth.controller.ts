@@ -308,23 +308,49 @@ export class AuthController {
       }
 
       // Query licenses table to find active license for this user's email
-      const { data: license, error: licenseError } = await supabase
+      let { data: license, error: licenseError } = await supabase
         .from('licenses')
         .select('id, license_key, user_email, status, expires_at')
         .eq('user_email', email)
         .eq('status', 'active')
         .single();
 
-      if (licenseError || !license) {
-        return res.status(403).json({ error: 'No active license' });
+      // If no license found but user has active subscription, create one
+      if ((licenseError || !license) && user.subscription_status === 'active') {
+        // Generate a new license key for the active subscriber
+        const newLicenseKey = `LIC-${user.id.substring(0, 8).toUpperCase()}-${Date.now()}`;
+        
+        // Create new license record
+        const { data: newLicense, error: createError } = await supabase
+          .from('licenses')
+          .insert({
+            user_id: user.id,
+            user_email: email,
+            license_key: newLicenseKey,
+            status: 'active',
+            license_type: 'subscription',
+            expires_at: user.subscription_current_period_end
+          })
+          .select('id, license_key, user_email, status, expires_at')
+          .single();
+
+        if (createError || !newLicense) {
+          console.error('Failed to create license for active subscriber:', createError);
+          return res.status(500).json({ error: 'Failed to create license' });
+        }
+
+        license = newLicense;
+      } else if (licenseError || !license) {
+        // Only reject if no license AND not an active subscriber
+        return res.status(403).json({ error: 'No active license or subscription' });
       }
 
       // Query authorized_devices table to count devices for this license_id
       const { data: devices, error: devicesError } = await supabase
         .from('authorized_devices')
-        .select('id, created_at')
+        .select('id, created_at, last_validated')
         .eq('license_id', license.id)
-        .order('created_at', { ascending: true });
+        .order('last_validated', { ascending: true, nullsFirst: true });
 
       if (devicesError) {
         throw devicesError;
@@ -332,7 +358,7 @@ export class AuthController {
 
       let deviceCount = devices?.length || 0;
 
-      // If count >= 3, delete the oldest device (earliest created_at) for this license_id
+      // If count >= 3, delete the oldest device (earliest last_validated) for this license_id
       if (deviceCount >= 3) {
         const oldestDevice = devices[0];
         const { error: deleteError } = await supabase
@@ -346,13 +372,14 @@ export class AuthController {
         deviceCount--;
       }
 
-      // Upsert the current device into authorized_devices table
+      // Upsert the current device into authorized_devices table with updated last_validated
       const { error: upsertError } = await supabase
         .from('authorized_devices')
         .upsert({
           license_id: license.id,
           device_id,
-          device_name
+          device_name,
+          last_validated: new Date().toISOString()
         }, {
           onConflict: 'license_id, device_id'
         });
@@ -414,9 +441,9 @@ export class AuthController {
       // Query authorized_devices table to count devices for this license_id
       const { data: devices, error: devicesError } = await supabase
         .from('authorized_devices')
-        .select('id, created_at')
+        .select('id, created_at, last_validated')
         .eq('license_id', license.id)
-        .order('created_at', { ascending: true });
+        .order('last_validated', { ascending: true, nullsFirst: true });
 
       if (devicesError) {
         throw devicesError;
@@ -424,7 +451,7 @@ export class AuthController {
 
       let deviceCount = devices?.length || 0;
 
-      // If count >= 3, delete the oldest device (earliest created_at) for this license_id
+      // If count >= 3, delete the oldest device (earliest last_validated) for this license_id
       if (deviceCount >= 3) {
         const oldestDevice = devices[0];
         const { error: deleteError } = await supabase
@@ -438,13 +465,14 @@ export class AuthController {
         deviceCount--;
       }
 
-      // Upsert the current device into authorized_devices table
+      // Upsert the current device into authorized_devices table with updated last_validated
       const { error: upsertError } = await supabase
         .from('authorized_devices')
         .upsert({
           license_id: license.id,
           device_id,
-          device_name
+          device_name,
+          last_validated: new Date().toISOString()
         }, {
           onConflict: 'license_id, device_id'
         });
