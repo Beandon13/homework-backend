@@ -49,16 +49,6 @@ export const validateLicense = async (req: Request, res: Response, next: NextFun
     // Validate the license
     const licenseInfo = await LicenseService.validateLicense(req.user.userId, licenseKey);
     
-    // Record the validation attempt
-    const ipAddress = req.ip || req.socket.remoteAddress;
-    await LicenseService.recordValidation(
-      req.user.userId,
-      licenseKey || '',
-      licenseInfo.isValid,
-      'api',
-      licenseInfo.errorReason,
-      ipAddress
-    );
     
     if (!licenseInfo.isValid) {
       return res.status(403).json({ 
