@@ -399,7 +399,10 @@ export class AuthController {
       const finalDeviceCount = finalDevices?.length || 0;
 
       // Generate JWT token
-      const token = generateToken(user.id);
+      const token = generateToken({
+        userId: user.id,
+        email: user.email
+      });
 
       return res.json({
         valid: true,
