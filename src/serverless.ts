@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.routes.js';
 import subscriptionRoutes from './routes/subscription.routes.js';
-import testRoutes from './routes/test.routes.js';
 
 // Load environment variables
 dotenv.config();
@@ -37,7 +36,6 @@ app.get('/api/health', (_req: any, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
-app.use('/api/test', testRoutes);
 
 // Error handling middleware
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction): void => {
