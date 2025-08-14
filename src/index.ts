@@ -26,8 +26,8 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 // Parse allowed origins from environment variable
 const getAllowedOrigins = (): string[] | boolean => {
   if (isDevelopment) {
-    // In development, allow localhost ports
-    return ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174'];
+    // In development, allow localhost ports and Electron apps
+    return ['file://', 'http://localhost:5173', 'http://localhost:3000', 'http://localhost:5174'];
   }
   
   // In production, use strict origin list from environment variable
@@ -38,8 +38,15 @@ const getAllowedOrigins = (): string[] | boolean => {
     return ['file://'];
   }
   
-  // Parse comma-separated origins
-  return allowedOrigins.split(',').map(origin => origin.trim()).filter(Boolean);
+  // Parse comma-separated origins and always include file:// for Electron apps
+  const origins = allowedOrigins.split(',').map(origin => origin.trim()).filter(Boolean);
+  
+  // Always include file:// to support Electron/desktop apps
+  if (!origins.includes('file://')) {
+    origins.unshift('file://');
+  }
+  
+  return origins;
 };
 
 const corsOptions: cors.CorsOptions = {
